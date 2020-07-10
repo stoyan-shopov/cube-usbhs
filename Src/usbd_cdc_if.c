@@ -22,6 +22,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_cdc_if.h"
 
+#include <stdbool.h>
+
 /* USER CODE BEGIN INCLUDE */
 
 /* USER CODE END INCLUDE */
@@ -251,6 +253,37 @@ static int8_t CDC_Control_HS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
   /* USER CODE END 10 */
 }
 
+struct
+{
+	uint8_t	buf[1024];
+	int	len;
+}
+inbuf, outbuf;
+volatile bool packet_received;
+
+volatile int busy_count;
+void handle_incoming_packets(void)
+{
+	if (!packet_received)
+		return;
+	outbuf = inbuf;
+	__asm__ volatile ("CPSID I\n");
+
+	while (CDC_Transmit_HS(outbuf.buf, outbuf.len) != USBD_OK)
+	{
+		__asm__ volatile ("CPSIE I\n");
+		busy_count ++;
+		__asm__ volatile ("wfi\n");
+		__asm__ volatile ("CPSID I\n");
+	}
+	packet_received = false;
+
+	USBD_CDC_SetRxBuffer(&hUsbDeviceHS, inbuf.buf);
+	USBD_CDC_ReceivePacket(&hUsbDeviceHS);
+
+	__asm__ volatile ("CPSIE I\n");
+}
+
 /**
   * @brief  Data received over USB OUT endpoint are sent over CDC interface
   *         through this function.
@@ -268,8 +301,14 @@ static int8_t CDC_Control_HS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_HS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 11 */
+	if (packet_received)
+		while(1);
+	memcpy(inbuf.buf, Buf, inbuf.len = * Len);
+	packet_received = true;
+#if 0
   USBD_CDC_SetRxBuffer(&hUsbDeviceHS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceHS);
+#endif
   return (USBD_OK);
   /* USER CODE END 11 */
 }
